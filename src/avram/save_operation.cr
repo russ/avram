@@ -47,11 +47,11 @@ abstract class Avram::SaveOperation(T) < Avram::Operation
 
   # :nodoc:
   def log_failed_save
-    Avram.settings.save_failed_log_level.try do |level|
-      Avram.logger.log(level, {
+    Avram::SaveFailedLog.dexter.warn do
+      {
         failed_to_save:    self.class.name.to_s,
         validation_errors: error_messages_as_string,
-      })
+      }
     end
   end
 
@@ -112,8 +112,25 @@ abstract class Avram::SaveOperation(T) < Avram::Operation
         @_{{ attribute[:name] }} ||= Avram::Attribute({{ attribute[:type] }}?).new(
           name: :{{ attribute[:name].id }},
           param: permitted_params["{{ attribute[:name] }}"]?,
-          value: @record.try(&.{{ attribute[:name] }}),
+          value: @record.try(&.{{ attribute[:name] }}) || default_value_for_{{ attribute[:name] }},
           param_key: self.class.param_key)
+      end
+
+      private def default_value_for_{{ attribute[:name] }}
+        {% if attribute[:value] || attribute[:value] == false %}
+          {% if attribute[:type].is_a?(Generic) %}
+            parse_result = {{ attribute[:type].type_vars.first }}::Lucky.parse([{{ attribute[:value] }}])
+          {% else %}
+            parse_result = {{ attribute[:type] }}::Lucky.parse({{ attribute[:value] }})
+          {% end %}
+          if parse_result.is_a? Avram::Type::SuccessfulCast
+            parse_result.value.as({{ attribute[:type] }})
+          else
+            nil
+          end
+        {% else %}
+          nil
+        {% end %}
       end
 
       def permitted_params
@@ -163,17 +180,15 @@ abstract class Avram::SaveOperation(T) < Avram::Operation
     end
   end
 
-  private def ensure_paramable(params)
-    if params.is_a? Avram::Paramable
-      params
-    else
-      Avram::Params.new(params)
-    end
-  end
-
-  # Runs `before_save` steps and returns `true` if all attributes are valid.
+  # Runs `before_save` steps,
+  # required validation, then returns `true` if all attributes are valid.
   def valid? : Bool
     before_save
+
+    # These validations must be ran after all `before_save` callbacks have completed
+    # in the case that someone has set a required field in a `before_save`. If we run
+    # this in a `before_save` ourselves, the ordering would cause this to be ran first.
+    validate_required *required_attributes
     attributes.all? &.valid?
   end
 
@@ -239,7 +254,7 @@ abstract class Avram::SaveOperation(T) < Avram::Operation
     {% end %}
   end
 
-  def changes
+  def changes : Hash(Symbol, String?)
     _changes = {} of Symbol => String?
     column_attributes.each do |attribute|
       if attribute.changed?
@@ -264,28 +279,8 @@ abstract class Avram::SaveOperation(T) < Avram::Operation
     {% end %}
   end
 
-  macro finished
-    # After all before_save callbacks run, make sure non-nilable column attributes
-    # are there.
-    #
-    # This must run after the other before_* callbacks otherwise it might mark
-    # a field as missing and then later another callback sets the field.
-    #
-    # For example:
-    #
-    #   before_save { email.value = "default@example.com" }
-    #
-    # If we had already validate 'email' it would say 'email is missing' when
-    # in reality We set it in another callback.
-    before_save validate_non_nilable_column_attributes
-
-    def validate_non_nilable_column_attributes
-      validate_required *required_attributes
-    end
-  end
-
   def save : Bool
-    if valid? && changes.any?
+    if valid? && (!persisted? || changes.any?)
       transaction_committed = database.transaction do
         insert_or_update
         saved_record = record.not_nil!

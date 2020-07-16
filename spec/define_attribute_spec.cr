@@ -16,7 +16,7 @@ private class Operation < Post::SaveOperation
   end
 end
 
-describe "attribute in forms" do
+describe "attribute in operations" do
   it "is a PermittedAttribute" do
     operation.password_confirmation.should be_a(Avram::PermittedAttribute(String?))
     operation.password_confirmation.name.should eq(:password_confirmation)
@@ -108,5 +108,5 @@ describe "attribute in forms" do
 end
 
 private def operation(attrs = {} of String => String)
-  Operation.new(attrs)
+  Operation.new(Avram::Params.new(attrs))
 end

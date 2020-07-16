@@ -8,6 +8,7 @@ private class SaveUser < User::SaveOperation
   # still included in validation errors.
   attribute should_not_override_permitted_columns : String
   permit_columns :name, :nickname, :joined_at, :age
+  attribute set_from_init : String
   before_save prepare
 
   def prepare
@@ -48,6 +49,10 @@ private class ParamKeySaveOperation < ValueColumnModel::SaveOperation
   param_key :custom_param
 end
 
+private class OverrideDefaults < ModelWithDefaultValues::SaveOperation
+  permit_columns :greeting, :drafted_at, :published_at, :admin, :age, :money
+end
+
 describe "Avram::SaveOperation" do
   it "allows overriding the param_key" do
     ParamKeySaveOperation.param_key.should eq "custom_param"
@@ -60,6 +65,14 @@ describe "Avram::SaveOperation" do
   it "add required_attributes method" do
     operation = SaveTask.new
     operation.required_attributes.should eq({operation.title})
+  end
+
+  it "can save empty arrays" do
+    bucket = BucketBox.create
+
+    bucket = Bucket::SaveOperation.update!(bucket, names: [] of String)
+
+    bucket.names.should eq([] of String)
   end
 
   it "set params if passed in" do
@@ -102,7 +115,8 @@ describe "Avram::SaveOperation" do
   end
 
   it "treats nil changes as nil and not an empty string" do
-    operation = SaveUser.new
+    user = UserBox.build
+    operation = SaveUser.new(user)
     operation.name.value = nil
 
     operation.changes.has_key?(:name).should be_true
@@ -110,7 +124,7 @@ describe "Avram::SaveOperation" do
   end
 
   describe "#errors" do
-    it "includes errors for all form attributes" do
+    it "includes errors for all operation attributes" do
       operation = SaveUser.new
 
       operation.valid?
@@ -156,22 +170,28 @@ describe "Avram::SaveOperation" do
 
       operation.name.value.should eq "New Name"
     end
+
+    it "allows setting attributes" do
+      operation = SaveUser.new(name: "Tracy", set_from_init: "success")
+      operation.name.value.should eq("Tracy")
+      operation.set_from_init.value.should eq("success")
+    end
   end
 
   describe "parsing" do
     it "parse integers, time objects, etc." do
       time = 1.day.ago.at_beginning_of_minute
-      operation = SaveUser.new({"joined_at" => time.to_s("%FT%X%z")})
+      operation = SaveUser.new(Avram::Params.new({"joined_at" => time.to_s("%FT%X%z")}))
 
       operation.joined_at.value.should eq time
       operation.joined_at.value.not_nil!.utc?.should be_true
     end
 
     it "gracefully handles bad inputs when parsing" do
-      operation = SaveUser.new({
+      operation = SaveUser.new(Avram::Params.new({
         "joined_at" => "this is not a time",
         "age"       => "not an int",
-      })
+      }))
 
       operation.joined_at.errors.should eq ["is invalid"]
       operation.age.errors.should eq ["is invalid"]
@@ -184,13 +204,13 @@ describe "Avram::SaveOperation" do
 
   describe "permit_columns" do
     it "ignores params that are not permitted" do
-      operation = SaveLimitedUser.new({"name" => "someone", "nickname" => "nothing"})
+      operation = SaveLimitedUser.new(Avram::Params.new({"name" => "someone", "nickname" => "nothing"}))
       operation.changes.has_key?(:nickname).should be_false
       operation.changes[:name]?.should eq "someone"
     end
 
     it "returns a Avram::PermittedAttribute" do
-      operation = SaveLimitedUser.new({"name" => "someone", "nickname" => "nothing"})
+      operation = SaveLimitedUser.new(Avram::Params.new({"name" => "someone", "nickname" => "nothing"}))
       operation.nickname.value.should be_nil
       operation.nickname.is_a?(Avram::Attribute).should be_true
       operation.name.value.should eq "someone"
@@ -200,7 +220,7 @@ describe "Avram::SaveOperation" do
 
   describe "settings values from params" do
     it "sets the values" do
-      params = {"name" => "Paul", "nickname" => "Pablito"}
+      params = Avram::Params.new({"name" => "Paul", "nickname" => "Pablito"})
 
       operation = SaveUser.new(params)
 
@@ -212,8 +232,9 @@ describe "Avram::SaveOperation" do
     it "returns the value from params for updates" do
       user = UserBox.build
       params = {"name" => "New Name From Params"}
+      avram_params = Avram::Params.new(params)
 
-      operation = SaveUser.new(user, params)
+      operation = SaveUser.new(user, avram_params)
 
       operation.name.value.should eq params["name"]
       operation.nickname.value.should eq user.nickname
@@ -223,7 +244,7 @@ describe "Avram::SaveOperation" do
 
   describe "params" do
     it "creates a param method for each of the permit_columns attributes" do
-      params = {"name" => "Paul", "nickname" => "Pablito"}
+      params = Avram::Params.new({"name" => "Paul", "nickname" => "Pablito"})
 
       operation = SaveUser.new(params)
 
@@ -234,7 +255,7 @@ describe "Avram::SaveOperation" do
     it "uses the value if param is empty" do
       user = UserBox.build
 
-      operation = SaveUser.new(user, {} of String => String)
+      operation = SaveUser.new(user, Avram::Params.new({} of String => String))
 
       operation.name.param.should eq user.name
     end
@@ -242,7 +263,7 @@ describe "Avram::SaveOperation" do
 
   describe "errors" do
     it "creates an error method for each of the permit_columns attributes" do
-      params = {"name" => "Paul", "age" => "30", "joined_at" => now_as_string}
+      params = Avram::Params.new({"name" => "Paul", "age" => "30", "joined_at" => now_as_string})
       operation = SaveUser.new(params)
       operation.valid?.should be_true
 
@@ -254,7 +275,7 @@ describe "Avram::SaveOperation" do
     end
 
     it "only returns unique errors" do
-      params = {"name" => "Paul", "nickname" => "Pablito"}
+      params = Avram::Params.new({"name" => "Paul", "nickname" => "Pablito"})
       operation = SaveUser.new(params)
 
       operation.name.add_error "is not valid"
@@ -266,7 +287,7 @@ describe "Avram::SaveOperation" do
 
   describe "attributes" do
     it "creates a method for each of the permit_columns attributes" do
-      params = {} of String => String
+      params = Avram::Params.new({} of String => String)
       operation = SaveLimitedUser.new(params)
 
       operation.responds_to?(:name).should be_true
@@ -274,7 +295,7 @@ describe "Avram::SaveOperation" do
     end
 
     it "returns an attribute with the attribute name, value and errors" do
-      params = {"name" => "Joe"}
+      params = Avram::Params.new({"name" => "Joe"})
       operation = SaveUser.new(params)
       operation.name.add_error "wrong"
 
@@ -303,8 +324,8 @@ describe "Avram::SaveOperation" do
     end
 
     context "on success" do
-      it "yields the form and the saved record" do
-        params = {"joined_at" => now_as_string, "name" => "New Name", "age" => "30"}
+      it "yields the operation and the saved record" do
+        params = Avram::Params.new({"joined_at" => now_as_string, "name" => "New Name", "age" => "30"})
         SaveUser.create params do |operation, record|
           operation.saved?.should be_true
           record.is_a?(User).should be_true
@@ -313,39 +334,72 @@ describe "Avram::SaveOperation" do
     end
 
     context "on failure" do
-      it "yields the form and nil" do
-        params = {"name" => "", "age" => "30"}
+      it "yields the operation and nil" do
+        params = Avram::Params.new({"name" => "", "age" => "30"})
         SaveUser.create params do |operation, record|
           operation.save_failed?.should be_true
           record.should be_nil
         end
       end
 
-      it "logs the failure if a logger is set" do
-        log_io = IO::Memory.new
-        logger = Dexter::Logger.new(log_io)
-        Avram.temp_config(logger: logger) do |settings|
-          SaveUser.create(name: "", age: 30) { |operation, record| :unused }
-          log_io.to_s.should contain(%("failed_to_save":"SaveUser","validation_errors":"name is required. joined_at is required"))
-        end
-      end
-
-      it "skips logging if log level is nil" do
-        log_io = IO::Memory.new
-        logger = Dexter::Logger.new(log_io)
-        Avram.temp_config(logger: logger, save_failed_log_level: nil) do |settings|
-          SaveUser.create(name: "", age: 30) { |operation, record| :unused }
-          log_io.to_s.should eq("")
+      it "logs the failure" do
+        Avram::SaveFailedLog.dexter.temp_config do |log_io|
+          SaveUser.create(name: "", age: 30) { |_operation, _record| :unused }
+          log_io.to_s.should contain(%("failed_to_save" => "SaveUser", "validation_errors" => "name is required. joined_at is required"))
         end
       end
     end
 
     context "with a uuid backed model" do
       it "can create with params" do
-        params = {"name" => "A fancy hat"}
+        params = Avram::Params.new({"name" => "A fancy hat"})
         SaveLineItem.create params do |operation, record|
           operation.saved?.should be_true
           record.should be_a(LineItem)
+        end
+      end
+    end
+
+    context "when there's default values in the table" do
+      it "saves with all of the default values" do
+        ModelWithDefaultValues::SaveOperation.create do |operation, record|
+          record.should_not eq nil
+          r = record.not_nil!
+          r.greeting.should eq "Hello there!"
+          r.admin.should eq false
+          r.age.should eq 30
+          r.money.should eq 3.5
+          r.published_at.should be_a Time
+          r.drafted_at.should be_a Time
+        end
+      end
+
+      it "allows you to override the default values" do
+        ModelWithDefaultValues::SaveOperation.create(greeting: "A fancy hat") do |operation, record|
+          record.should_not eq nil
+          r = record.not_nil!
+          r.greeting.should eq "A fancy hat"
+          r.admin.should eq false
+          r.age.should eq 30
+          r.money.should eq 3.5
+          r.published_at.should be_a Time
+          r.drafted_at.should be_a Time
+        end
+      end
+
+      it "overrides all of the defaults through params" do
+        published_at = 1.day.ago.to_utc.at_beginning_of_day
+        drafted_at = 1.week.ago.to_utc.at_beginning_of_day
+        params = Avram::Params.new({"greeting" => "Hi", "admin" => "true", "age" => "4", "money" => "100.23", "published_at" => published_at.to_s, "drafted_at" => drafted_at.to_s})
+        OverrideDefaults.create(params) do |operation, record|
+          record.should_not eq nil
+          r = record.not_nil!
+          r.greeting.should eq "Hi"
+          r.admin.should eq true
+          r.age.should eq 4
+          r.money.should eq 100.23
+          r.published_at.should eq published_at
+          r.drafted_at.should eq drafted_at
         end
       end
     end
@@ -359,7 +413,7 @@ describe "Avram::SaveOperation" do
 
     context "on success" do
       it "saves and returns the record" do
-        params = {"joined_at" => now_as_string, "name" => "New Name", "age" => "30"}
+        params = Avram::Params.new({"joined_at" => now_as_string, "name" => "New Name", "age" => "30"})
 
         record = SaveUser.create!(params)
 
@@ -370,7 +424,7 @@ describe "Avram::SaveOperation" do
 
     context "on failure" do
       it "raises an exception" do
-        params = {"name" => "", "age" => "30"}
+        params = Avram::Params.new({"name" => "", "age" => "30"})
 
         expect_raises Avram::InvalidOperationError do
           SaveUser.create!(params)
@@ -389,7 +443,7 @@ describe "Avram::SaveOperation" do
     end
 
     it "can handle an attribute named 'value'" do
-      ValueColumnModelSaveOperation.new({"value" => "value"}).value.value.should eq "value"
+      ValueColumnModelSaveOperation.new(Avram::Params.new({"value" => "value"})).value.value.should eq "value"
     end
   end
 
@@ -397,7 +451,7 @@ describe "Avram::SaveOperation" do
     it "works when there are no changes" do
       UserBox.new.name("Old Name").create
       user = UserQuery.new.first
-      params = {} of String => String
+      params = Avram::Params.new({} of String => String)
       SaveUser.update user, with: params do |operation, record|
         operation.saved?.should be_true
       end
@@ -406,7 +460,6 @@ describe "Avram::SaveOperation" do
     it "returns true when there are no changes" do
       UserBox.new.name("Old Name").create
       user = UserQuery.new.first
-      params = {} of String => String
       SaveUser.new(user).tap do |operation|
         operation.save.should be_true
       end
@@ -423,10 +476,10 @@ describe "Avram::SaveOperation" do
     end
 
     context "on success" do
-      it "yields the form and the updated record" do
+      it "yields the operation and the updated record" do
         UserBox.new.name("Old Name").create
         user = UserQuery.new.first
-        params = {"name" => "New Name"}
+        params = Avram::Params.new({"name" => "New Name"})
         SaveUser.update user, with: params do |operation, record|
           operation.saved?.should be_true
           record.name.should eq "New Name"
@@ -435,7 +488,7 @@ describe "Avram::SaveOperation" do
 
       it "updates updated_at" do
         user = UserBox.new.updated_at(1.day.ago).create
-        params = {"name" => "New Name"}
+        params = Avram::Params.new({"name" => "New Name"})
         SaveUser.update user, with: params do |operation, record|
           operation.saved?.should be_true
           record.updated_at.should be > 1.second.ago
@@ -444,10 +497,10 @@ describe "Avram::SaveOperation" do
     end
 
     context "on failure" do
-      it "yields the form and nil" do
+      it "yields the operation and nil" do
         UserBox.new.name("Old Name").create
         user = UserQuery.new.first
-        params = {"name" => ""}
+        params = Avram::Params.new({"name" => ""})
         SaveUser.update user, with: params do |operation, record|
           operation.save_failed?.should be_true
           record.name.should eq "Old Name"
@@ -457,11 +510,10 @@ describe "Avram::SaveOperation" do
       it "logs the failure" do
         UserBox.new.name("Old Name").create
         user = UserQuery.new.first
-        log_io = IO::Memory.new
-        logger = Dexter::Logger.new(log_io)
-        Avram.temp_config(logger: logger) do |settings|
-          SaveUser.update(user, name: "") { |operation, record| :unused }
-          log_io.to_s.should contain(%("failed_to_save":"SaveUser","validation_errors":"name is required"))
+
+        Avram::SaveFailedLog.dexter.temp_config do |log_io|
+          SaveUser.update(user, name: "") { |_operation, _record| :unused }
+          log_io.to_s.should contain(%("failed_to_save" => "SaveUser", "validation_errors" => "name is required"))
         end
       end
     end
@@ -469,7 +521,7 @@ describe "Avram::SaveOperation" do
     context "with a uuid backed model" do
       it "doesn't generate a new uuid" do
         line_item = LineItemBox.create
-        SaveLineItem.update(line_item, {"name" => "Another pair of shoes"}) do |operation, record|
+        SaveLineItem.update(line_item, Avram::Params.new({"name" => "Another pair of shoes"})) do |operation, record|
           operation.saved?.should be_true
           record.id.should eq line_item.id
         end
@@ -488,7 +540,7 @@ describe "Avram::SaveOperation" do
       it "updates and returns the record" do
         UserBox.new.name("Old Name").create
         user = UserQuery.new.first
-        params = {"name" => "New Name"}
+        params = Avram::Params.new({"name" => "New Name"})
 
         record = SaveUser.update! user, with: params
 
@@ -501,7 +553,7 @@ describe "Avram::SaveOperation" do
       it "raises an exception" do
         UserBox.new.name("Old Name").create
         user = UserQuery.new.first
-        params = {"name" => ""}
+        params = Avram::Params.new({"name" => ""})
 
         expect_raises Avram::InvalidOperationError do
           SaveUser.update! user, with: params

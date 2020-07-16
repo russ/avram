@@ -3,11 +3,15 @@ require "spec"
 require "../src/avram"
 require "./support/base_model"
 require "./support/**"
-require "../config/database"
+require "../config/*"
 
-Db::VerifyConnection.new(quiet: true).call
+backend = Log::IOBackend.new(STDERR)
+backend.formatter = Dexter::JSONLogFormatter.proc
+Log.builder.bind("avram.*", :error, Log::IOBackend.new(STDERR))
+
 Db::Create.new(quiet: true).call
 Db::Migrate.new(quiet: true).call
+Db::VerifyConnection.new(quiet: true).call
 
 Spec.before_each do
   TestDatabase.truncate

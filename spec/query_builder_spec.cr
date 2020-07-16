@@ -7,6 +7,7 @@ describe Avram::QueryBuilder do
       .where(Avram::Where::Equal.new(:name, "Paul"))
       .raw_where(Avram::Where::Raw.new("name = ?", "Mikias"))
       .raw_where(Avram::Where::Raw.new("name = ?", "Mikias"))
+      .raw_where(Avram::Where::Raw.new("name = ?", args: ["Mikias"]))
       .join(Avram::Join::Inner.new(:users, :posts))
       .join(Avram::Join::Inner.new(:users, :posts))
       .order_by(Avram::OrderBy.new(:my_column, :asc))
@@ -26,6 +27,23 @@ describe Avram::QueryBuilder do
     query.reset_order
 
     query.statement.should eq "SELECT * FROM users"
+  end
+
+  it "can reset where for a specific column" do
+    query = new_query
+      .where(Avram::Where::GreaterThan.new(:age, "18"))
+      .where(Avram::Where::LessThan.new(:age, "81"))
+      .where(Avram::Where::Equal.new(:name, "Pauline"))
+    query.args.should eq ["18", "81", "Pauline"]
+
+    query.reset_where("name")
+
+    query.statement.should eq "SELECT * FROM users WHERE age > $1 AND age < $2"
+    query.args.should eq ["18", "81"]
+
+    query.reset_where(:age)
+
+    query.args.should be_empty
   end
 
   it "selects all" do
@@ -71,8 +89,9 @@ describe Avram::QueryBuilder do
     query = new_query
       .raw_where(Avram::Where::Raw.new("name = ?", "Mikias"))
       .raw_where(Avram::Where::Raw.new("age > ?", 26))
+      .raw_where(Avram::Where::Raw.new("age < ?", args: [30]))
       .limit(1)
-    query.statement.should eq "SELECT * FROM users WHERE name = 'Mikias' AND age > 26 LIMIT 1"
+    query.statement.should eq "SELECT * FROM users WHERE name = 'Mikias' AND age > 26 AND age < 30 LIMIT 1"
     query.args.empty?.should be_true
   end
 

@@ -21,6 +21,12 @@ struct Int32
       SuccessfulCast(Int32).new(value)
     end
 
+    def parse(value : Int64)
+      SuccessfulCast(Int32).new value.to_i32
+    rescue OverflowError
+      FailedCast.new
+    end
+
     def parse(values : Array(Int32))
       SuccessfulCast(Array(Int32)).new values
     end
@@ -35,6 +41,14 @@ struct Int32
 
     class Criteria(T, V) < Avram::Criteria(T, V)
       include Avram::BetweenCriteria(T, V)
+
+      def select_sum : Int64?
+        super.as(Int64?)
+      end
+
+      def select_sum! : Int64
+        select_sum || 0_i64
+      end
     end
   end
 end

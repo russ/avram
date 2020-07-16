@@ -1,9 +1,12 @@
 require "./index_statement_helpers"
+require "./missing_on_delete_with_belongs_to_error"
 
 class Avram::Migrator::AlterTableStatement
   include Avram::Migrator::IndexStatementHelpers
+  include Avram::Migrator::MissingOnDeleteWithBelongsToError
 
   getter rows = [] of String
+  getter renamed_rows = [] of String
   getter dropped_rows = [] of String
   getter fill_existing_with_statements = [] of String
   getter change_type_statements = [] of String
@@ -58,16 +61,18 @@ class Avram::Migrator::AlterTableStatement
   end
 
   def alter_statements : Array(String)
-    if (rows + dropped_rows).empty?
-      [] of String
-    else
-      statement = String.build do |statement|
+    alterations = renamed_rows.map do |statement|
+      "ALTER TABLE #{@table_name} #{statement};"
+    end
+    unless (rows + dropped_rows).empty?
+      alterations << String.build do |statement|
         statement << "ALTER TABLE #{@table_name}"
         statement << "\n"
         statement << (rows + dropped_rows).join(",\n")
+        statement << ';'
       end
-      [statement]
     end
+    alterations
   end
 
   # Adds a references column and index given a model class and references option.
@@ -97,11 +102,6 @@ class Avram::Migrator::AlterTableStatement
     add_index :{{ foreign_key_name }}
   end
 
-  macro add_belongs_to(_type_declaration, references = nil)
-    {% raise "Must use 'on_delete' when creating an add_belongs_to association.
-      Example: add_belongs_to user : User, on_delete: :cascade" %}
-  end
-
   macro add(type_declaration, index = false, using = :btree, unique = false, default = nil, fill_existing_with = nil, **type_options)
     {% if type_declaration.type.is_a?(Union) %}
       {% type = type_declaration.type.types.first %}
@@ -113,7 +113,7 @@ class Avram::Migrator::AlterTableStatement
       {% array = true %}
     {% else %}
       {% type = type_declaration.type %}
-      {% nilable = false %}
+      {% nilable = (fill_existing_with != nil) && (fill_existing_with != :nothing) %}
       {% array = false %}
     {% end %}
 
@@ -168,13 +168,36 @@ class Avram::Migrator::AlterTableStatement
     ]
   end
 
-  def remove(name : Symbol)
-    dropped_rows << "  DROP #{name.to_s}"
+  {% symbol_expected_message = "%s expected a symbol like ':user', instead got: '%s'" %}
+
+  macro rename(old_name, new_name)
+    {% for name in {old_name, new_name} %}
+      {% unless name.is_a?(SymbolLiteral) %}
+        {% raise symbol_expected_message % {"rename", name} %}
+      {% end %}
+    {% end %}
+    renamed_rows << "RENAME COLUMN #{{{old_name}}} TO #{{{new_name}}}"
+  end
+
+  macro rename_belongs_to(old_association_name, new_association_name)
+    {% for association_name in {old_association_name, new_association_name} %}
+      {% unless association_name.is_a?(SymbolLiteral) %}
+        {% raise symbol_expected_message % {"rename_belongs_to", association_name} %}
+      {% end %}
+    {% end %}
+    rename {{old_association_name}}_id, {{new_association_name}}_id
+  end
+
+  macro remove(name)
+    {% unless name.is_a?(SymbolLiteral) %}
+      {% raise symbol_expected_message % {"remove", name} %}
+    {% end %}
+    dropped_rows << "  DROP #{{{name}}}"
   end
 
   macro remove_belongs_to(association_name)
     {% unless association_name.is_a?(SymbolLiteral) %}
-      {% raise "remove_belongs_to expected a symbol like ':user', instead got: '#{association_name}'" %}
+      {% raise symbol_expected_message % {"remove_belongs_to", association_name} %}
     {% end %}
     remove {{ association_name }}_id
   end

@@ -1,9 +1,0 @@
-language: minimal
-before_install:
-  - script/setup
-script:
-  - script/test
-notifications:
-  email: false
-addons:
-  postgresql: "9.4"

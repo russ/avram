@@ -62,16 +62,32 @@ module Avram::Queryable(T)
     self
   end
 
-  def distinct_on(&block) : self
-    criteria = yield self
-    criteria.__distinct_on
+  def reset_limit : self
+    query.limit(nil)
     self
   end
 
-  # Delete the records using the query's where clauses,
-  # or all the records if no wheres are added.
+  def reset_offset : self
+    query.offset(nil)
+    self
+  end
+
+  def distinct_on(&block) : self
+    criteria = yield self
+    criteria.private_distinct_on
+    self
+  end
+
+  def reset_where(&block) : self
+    criteria = yield self
+    criteria.private_reset_where
+    self
+  end
+
+  # Delete the records using the query's where clauses, or all records if no wheres are added.
   #
-  # returns the number of records removed as `Int64`.
+  # Returns the number of deleted records as `Int64`.
+  #
   # ```
   # # DELETE FROM users WHERE age < 21
   # UserQuery.new.age.lt(21).delete
@@ -82,6 +98,16 @@ module Avram::Queryable(T)
       db.exec(query.statement, args: query.args).rows_affected
     end
   end
+
+  # Update the records using the query's where clauses, or all records if no wheres are added.
+  #
+  # Returns the number of records updated as `Int64`.
+  #
+  # ```
+  # # Update all comments with the word "spam" as spam
+  # CommentQuery.new.body.ilike("spam").update(spam: true)
+  # ```
+  abstract def update : Int64
 
   def join(join_clause : Avram::Join::SqlClause) : self
     query.join(join_clause)
@@ -94,7 +120,11 @@ module Avram::Queryable(T)
   end
 
   def where(statement : String, *bind_vars) : self
-    query.raw_where(Avram::Where::Raw.new(statement, *bind_vars))
+    where(statement, args: bind_vars.to_a)
+  end
+
+  def where(statement : String, *, args bind_vars : Array) : self
+    query.raw_where(Avram::Where::Raw.new(statement, args: bind_vars))
     self
   end
 
@@ -108,7 +138,7 @@ module Avram::Queryable(T)
 
   def group(&block) : self
     criteria = yield self
-    criteria.__group
+    criteria.private_group
     self
   end
 
@@ -152,6 +182,8 @@ module Avram::Queryable(T)
   def select_count : Int64
     query.select_count
     exec_scalar.as(Int64)
+  rescue e : DB::NoResultsError
+    0_i64
   end
 
   def each
@@ -196,5 +228,9 @@ module Avram::Queryable(T)
 
   def to_sql
     query.to_sql
+  end
+
+  def to_prepared_sql
+    query.to_prepared_sql
   end
 end

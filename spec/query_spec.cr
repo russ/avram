@@ -42,6 +42,13 @@ describe Avram::Query do
     query.args.should eq [] of String
   end
 
+  it "can reset where on a specific column" do
+    query = UserQuery.new.name("Purcell").age(35).reset_where(&.name).query
+
+    query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users WHERE users.age = $1"
+    query.args.should eq ["35"] of String
+  end
+
   it "can select distinct on a specific column" do
     UserBox.new.name("Purcell").age(22).create
     UserBox.new.name("Purcell").age(84).create
@@ -337,6 +344,11 @@ describe Avram::Query do
       min = UserQuery.new.age.gte(2).age.select_min
       min.should eq 2
     end
+
+    it "returns nil if no records" do
+      min = UserQuery.new.age.select_min
+      min.should be_nil
+    end
   end
 
   describe "#select_max" do
@@ -355,6 +367,11 @@ describe Avram::Query do
       max = UserQuery.new.age.lte(2).age.select_max
       max.should eq 2
     end
+
+    it "returns nil if no records" do
+      max = UserQuery.new.age.select_max
+      max.should be_nil
+    end
   end
 
   describe "#select_average" do
@@ -363,7 +380,13 @@ describe Avram::Query do
       UserBox.create &.age(1)
       UserBox.create &.age(3)
       average = UserQuery.new.age.select_average
-      average.should eq 2.0
+      average.should eq 2
+      average.should be_a Float64
+    end
+
+    it "returns nil if there are no records" do
+      average = UserQuery.new.age.select_average
+      average.should be_nil
     end
 
     it "works with chained where clauses" do
@@ -375,21 +398,101 @@ describe Avram::Query do
     end
   end
 
+  describe "#select_average!" do
+    it "returns 0_f64 if there are no records" do
+      average = UserQuery.new.age.select_average!
+      average.should eq 0
+      average.should be_a Float64
+    end
+  end
+
   describe "#select_sum" do
+    it "works with chained where clauses" do
+      UserBox.create &.total_score(2000)
+      UserBox.create &.total_score(1000)
+      UserBox.create &.total_score(3000)
+      sum = UserQuery.new.total_score.gte(2000).total_score.select_sum
+      sum.should eq 5000
+    end
+
+    it "returns nil if there are no records" do
+      query_sum = UserQuery.new.age.select_sum
+      query_sum.should be_nil
+    end
+  end
+
+  describe "#select_sum for Int64 column" do
+    it "returns the sum" do
+      UserBox.create &.total_score(2000)
+      UserBox.create &.total_score(1000)
+      UserBox.create &.total_score(3000)
+      sum = UserQuery.new.total_score.select_sum
+      sum.should eq 6000
+      sum.should be_a Int64
+    end
+  end
+
+  describe "#select_sum! for Int64 column" do
+    it "returns 0 if there are no records" do
+      query_sum = UserQuery.new.total_score.select_sum!
+      query_sum.should eq 0
+      query_sum.should be_a Int64
+    end
+  end
+
+  describe "#select_sum for Int32 column" do
     it "returns the sum" do
       UserBox.create &.age(2)
       UserBox.create &.age(1)
       UserBox.create &.age(3)
-      sum = UserQuery.new.age.select_sum
-      sum.should eq 6
+      query_sum = UserQuery.new.age.select_sum
+      query_sum.should eq 6
+      query_sum.should be_a Int64
     end
+  end
 
-    it "works with chained where clauses" do
-      UserBox.create &.age(2)
-      UserBox.create &.age(1)
-      UserBox.create &.age(3)
-      sum = UserQuery.new.age.gte(2).age.select_sum
-      sum.should eq 5
+  describe "#select_sum! for Int32 column" do
+    it "returns 0 if there are no records" do
+      query_sum = UserQuery.new.id.select_sum!
+      query_sum.should eq 0
+      query_sum.should be_a Int64
+    end
+  end
+
+  describe "#select_sum for Int16 column" do
+    it "returns the sum" do
+      UserBox.create &.year_born(1990_i16)
+      UserBox.create &.year_born(1995_i16)
+      query_sum = UserQuery.new.year_born.select_sum
+      query_sum.should eq 3985
+      query_sum.should be_a Int64
+    end
+  end
+
+  describe "#select_sum! for Int16 column" do
+    it "returns 0 if there are no records" do
+      query_sum = UserQuery.new.id.select_sum!
+      query_sum.should eq 0
+      query_sum.should be_a Int64
+    end
+  end
+
+  describe "#select_sum for Float64 column" do
+    it "returns the sum" do
+      scores = [100.4, 123.22]
+      sum = scores.sum
+      scores.each { |score| UserBox.create &.average_score(score) }
+      query_sum = UserQuery.new.average_score.select_sum
+      query_sum.should eq sum
+      sum.should be_a Float64
+    end
+  end
+
+  describe "#select_sum! for Float64 column" do
+    it "returns 0 if there are no records" do
+      query_sum = UserQuery.new.average_score.select_sum!
+      query_sum.should eq 0
+      query_sum.should be_a Float64
     end
   end
 
@@ -428,6 +531,11 @@ describe Avram::Query do
       expect_raises(Avram::UnsupportedQueryError) do
         UserQuery.new.offset(1).select_count
       end
+    end
+
+    it "returns 0 if postgres returns no results" do
+      query = UserQuery.new.distinct_on(&.name).average_score.gt(5).group(&.name).group(&.id).select_count
+      query.should eq 0
     end
   end
 
@@ -596,7 +704,64 @@ describe Avram::Query do
     end
   end
 
-  describe "delete_all" do
+  describe "update" do
+    it "updates records when wheres are added" do
+      UserBox.create &.available_for_hire(false)
+      UserBox.create &.available_for_hire(false)
+
+      updated_count = ChainedQuery.new.update(available_for_hire: true)
+
+      updated_count.should eq(2)
+      results = ChainedQuery.new.results
+      results.size.should eq(2)
+      results.all?(&.available_for_hire).should be_true
+    end
+
+    it "updates some records when wheres are added" do
+      helen = UserBox.create &.available_for_hire(false).name("Helen")
+      kate = UserBox.create &.available_for_hire(false).name("Kate")
+
+      updated_count = ChainedQuery.new.name("Helen").update(available_for_hire: true)
+
+      updated_count.should eq 1
+      helen.reload.available_for_hire.should be_true
+      kate.reload.available_for_hire.should be_false
+    end
+
+    it "only sets columns to `nil` if explicitly set" do
+      richard = UserBox.create &.name("Richard").nickname("Rich")
+
+      updated_count = ChainedQuery.new.update(nickname: nil)
+
+      updated_count.should eq 1
+      richard = richard.reload
+      richard.nickname.should be_nil
+      richard.name.should eq("Richard")
+    end
+
+    it "works with JSON" do
+      blob = BlobBox.create &.doc(JSON::Any.new({"updated" => JSON::Any.new(true)}))
+
+      updated_doc = JSON::Any.new({"updated" => JSON::Any.new(false)})
+      updated_count = Blob::BaseQuery.new.update(doc: updated_doc)
+
+      updated_count.should eq(1)
+      blog = blob.reload
+      blog.doc.should eq(updated_doc)
+    end
+
+    it "works with arrays" do
+      bucket = BucketBox.create &.names(["Luke"])
+
+      updated_count = Bucket::BaseQuery.new.update(names: ["Rey"])
+
+      updated_count.should eq(1)
+      bucket = bucket.reload
+      bucket.names.should eq(["Rey"])
+    end
+  end
+
+  describe "delete" do
     it "deletes user records that are young" do
       UserBox.new.name("Tony").age(48).create
       UserBox.new.name("Peter").age(15).create
@@ -705,6 +870,13 @@ describe Avram::Query do
         cloned_products.first.line_items.first.price.should_not be_nil
       end
     end
+
+    it "clones distinct queries" do
+      original_query = Post::BaseQuery.new.distinct_on(&.title).clone
+      new_query = original_query.published_at.is_nil
+
+      new_query.to_sql[0].should contain "DISTINCT ON"
+    end
   end
 
   describe "#between" do
@@ -755,6 +927,81 @@ describe Avram::Query do
       expect_raises(PQ::PQError, /column "users\.id" must appear in the GROUP BY/) do
         users.map(&.name).should contain "Pam"
       end
+    end
+  end
+
+  context "queries joining with has_one" do
+    describe "when you query from the belongs_to side" do
+      it "returns a record" do
+        line_item = LineItemBox.create &.name("Thing 1")
+        price = PriceBox.create &.in_cents(100).line_item_id(line_item.id)
+
+        query = PriceQuery.new.where_line_items(LineItemQuery.new.name("Thing 1"))
+        query.first.should eq price
+      end
+    end
+
+    describe "when you query from the has_one side" do
+      it "returns a record" do
+        line_item = LineItemBox.create &.name("Thing 1")
+        price = PriceBox.create &.in_cents(100).line_item_id(line_item.id)
+
+        query = LineItemQuery.new.where_price(PriceQuery.new.in_cents(100))
+        query.first.should eq line_item
+      end
+    end
+  end
+
+  describe "#to_prepared_sql" do
+    it "returns the full SQL with args combined" do
+      query = Post::BaseQuery.new.title("The Short Post")
+      query.to_prepared_sql.should eq(%{SELECT posts.custom_id, posts.created_at, posts.updated_at, posts.title, posts.published_at FROM posts WHERE posts.title = 'The Short Post'})
+
+      query = Bucket::BaseQuery.new.names(["Larry", "Moe", "Curly"]).numbers([1, 2, 3])
+      query.to_prepared_sql.should eq(%{SELECT buckets.id, buckets.created_at, buckets.updated_at, buckets.bools, buckets.small_numbers, buckets.numbers, buckets.big_numbers, buckets.names FROM buckets WHERE buckets.names = '{"Larry","Moe","Curly"}' AND buckets.numbers = '{1,2,3}'})
+
+      query = Blob::BaseQuery.new.doc(JSON::Any.new({"properties" => JSON::Any.new("sold")}))
+      query.to_prepared_sql.should eq(%{SELECT blobs.id, blobs.created_at, blobs.updated_at, blobs.doc FROM blobs WHERE blobs.doc = '{"properties":"sold"}'})
+
+      query = UserQuery.new.name.in(["Don", "Juan"]).age.gt(30)
+      query.to_prepared_sql.should eq(%{SELECT #{User::COLUMN_SQL} FROM users WHERE users.name = ANY ('{"Don","Juan"}') AND users.age > '30'})
+    end
+
+    it "returns the full SQL with a lot of args" do
+      a_week = 1.week.ago
+      an_hour = 1.hour.ago
+      a_day = 1.day.ago
+
+      query = UserQuery.new
+        .name("Don")
+        .age.gt(21)
+        .age.lt(99)
+        .nickname.ilike("j%")
+        .nickname.ilike("%y")
+        .joined_at.gt(a_week)
+        .joined_at.lt(an_hour)
+        .average_score.gt(1.2)
+        .average_score.lt(4.9)
+        .available_for_hire(true)
+        .created_at(a_day)
+
+      query.to_prepared_sql.should eq(%{SELECT users.id, users.created_at, users.updated_at, users.name, users.age, users.year_born, users.nickname, users.joined_at, users.total_score, users.average_score, users.available_for_hire FROM users WHERE users.name = 'Don' AND users.age > '21' AND users.age < '99' AND users.nickname ILIKE 'j%' AND users.nickname ILIKE '%y' AND users.joined_at > '#{a_week}' AND users.joined_at < '#{an_hour}' AND users.average_score > '1.2' AND users.average_score < '4.9' AND users.available_for_hire = 'true' AND users.created_at = '#{a_day}'})
+    end
+  end
+
+  describe "#reset_limit" do
+    it "resets the limit to nil" do
+      users = UserQuery.new.limit(10)
+      users.query.limit.should eq 10
+      users.reset_limit.query.limit.should eq nil
+    end
+  end
+
+  describe "#reset_offset" do
+    it "resets the offset to nil" do
+      users = UserQuery.new.offset(10)
+      users.query.offset.should eq 10
+      users.reset_offset.query.offset.should eq nil
     end
   end
 end

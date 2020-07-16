@@ -32,12 +32,12 @@ module Avram::Migrator::StatementHelpers
     prepared_statements << CreateForeignKeyStatement.new(from, to, on_delete, column, primary_key).build
   end
 
-  def create_index(table_name : Symbol, columns : Columns, unique = false, using = :btree)
-    prepared_statements << CreateIndexStatement.new(table_name, columns, using, unique).build
+  def create_index(table_name : Symbol, columns : Columns, unique = false, using = :btree, name : String? | Symbol? = nil)
+    prepared_statements << CreateIndexStatement.new(table_name, columns, using, unique, name).build
   end
 
-  def drop_index(table_name : Symbol, columns : Columns, if_exists = false, on_delete = :do_nothing)
-    prepared_statements << Avram::Migrator::DropIndexStatement.new(table_name, columns, if_exists, on_delete).build
+  def drop_index(table_name : Symbol, columns : Columns? = nil, if_exists = false, on_delete = :do_nothing, name : String? | Symbol? = nil)
+    prepared_statements << Avram::Migrator::DropIndexStatement.new(table_name, columns, if_exists, on_delete, name).build
   end
 
   def make_required(table : Symbol, column : Symbol)
@@ -46,5 +46,17 @@ module Avram::Migrator::StatementHelpers
 
   def make_optional(table : Symbol, column : Symbol)
     prepared_statements << Avram::Migrator::ChangeNullStatement.new(table, column, required: false).build
+  end
+
+  def enable_extension(name : String)
+    prepared_statements << Avram::Migrator::CreateExtensionStatement.new(name).build
+  end
+
+  def disable_extension(name : String)
+    prepared_statements << Avram::Migrator::DropExtensionStatement.new(name).build
+  end
+
+  def update_extension(name : String, to : String? = nil)
+    prepared_statements << Avram::Migrator::AlterExtensionStatement.new(name, to: to).build
   end
 end
