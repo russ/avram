@@ -88,7 +88,7 @@ class Avram::QueryBuilder
   end
 
   def args_for_update(params)
-    param_values(params) + prepared_statement_values
+    param_values(params) + prepared_statement_values + limit_offset_values
   end
 
   private def param_values(params)
@@ -117,7 +117,18 @@ class Avram::QueryBuilder
   end
 
   def args : Array(String | Array(String) | Array(Int32))
-    prepared_statement_values
+    prepared_statement_values + limit_offset_values
+  end
+
+  # LIMIT/OFFSET are bound as params (see `limit_sql`/`offset_sql`) so that
+  # paginating a query reuses ONE cached prepared statement instead of minting a
+  # fresh one per distinct offset. Order matches the placeholder order in
+  # `sql_condition_clauses`: limit before offset, after the wheres.
+  private def limit_offset_values : Array(String)
+    values = [] of String
+    values << @limit.to_s if @limit
+    values << @offset.to_s if @offset
+    values
   end
 
   private def sql_condition_clauses
@@ -310,13 +321,13 @@ class Avram::QueryBuilder
 
   private def limit_sql : String?
     if @limit
-      "LIMIT #{@limit}"
+      "LIMIT #{next_prepared_statement_placeholder}"
     end
   end
 
   private def offset_sql : String?
     if @offset
-      "OFFSET #{@offset}"
+      "OFFSET #{next_prepared_statement_placeholder}"
     end
   end
 

@@ -67,14 +67,14 @@ describe Avram::QueryBuilder do
 
   it "can be limited" do
     query = new_query.limit(1)
-    query.statement.should eq "SELECT * FROM users LIMIT 1"
-    query.args.should eq [] of String
+    query.statement.should eq "SELECT * FROM users LIMIT $1"
+    query.args.should eq ["1"]
   end
 
   it "can be offset" do
     query = new_query.offset(1)
-    query.statement.should eq "SELECT * FROM users OFFSET 1"
-    query.args.should eq [] of String
+    query.statement.should eq "SELECT * FROM users OFFSET $1"
+    query.args.should eq ["1"]
   end
 
   it "accepts where clauses and limits" do
@@ -83,8 +83,8 @@ describe Avram::QueryBuilder do
       .where(Avram::Where::GreaterThan.new(:age, "20"))
       .where(Avram::Where::Null.new(:nickname))
       .limit(1)
-    query.statement.should eq "SELECT * FROM users WHERE name = $1 AND age > $2 AND nickname IS NULL LIMIT 1"
-    query.args.should eq ["Paul", "20"]
+    query.statement.should eq "SELECT * FROM users WHERE name = $1 AND age > $2 AND nickname IS NULL LIMIT $3"
+    query.args.should eq ["Paul", "20", "1"]
   end
 
   it "has the same statement on subsequent calls" do
@@ -102,8 +102,8 @@ describe Avram::QueryBuilder do
         .where(Avram::Where::Raw.new("age > ?", 26))
         .where(Avram::Where::Raw.new("age < ?", args: [30]))
         .limit(1)
-      query.statement.should eq "SELECT * FROM users WHERE name = 'Mikias' AND age > 26 AND age < 30 LIMIT 1"
-      query.args.empty?.should be_true
+      query.statement.should eq "SELECT * FROM users WHERE name = 'Mikias' AND age > 26 AND age < 30 LIMIT $1"
+      query.args.should eq ["1"]
     end
 
     it "escaping elements to prevent sql injections" do
@@ -171,8 +171,8 @@ describe Avram::QueryBuilder do
         .where(Avram::Where::Equal.new(:id, "1"))
         .limit(1)
 
-      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT 1 RETURNING *)
-      query.args_for_update(params).should eq ["Paul", nil, "1"]
+      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT $4 RETURNING *)
+      query.args_for_update(params).should eq ["Paul", nil, "1", "1"]
     end
 
     it "has the same placeholder values on subsequent calls" do
@@ -181,8 +181,8 @@ describe Avram::QueryBuilder do
         .where(Avram::Where::Equal.new(:id, "1"))
         .limit(1)
 
-      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT 1 RETURNING *)
-      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT 1 RETURNING *)
+      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT $4 RETURNING *)
+      query.statement_for_update(params).should eq %(UPDATE users SET "first_name" = $1, "last_name" = $2 WHERE id = $3 LIMIT $4 RETURNING *)
     end
 
     it "quotes the columns to ensure reserved keywords can be used" do
@@ -191,8 +191,8 @@ describe Avram::QueryBuilder do
         .where(Avram::Where::Equal.new(:id, "1"))
         .limit(1)
 
-      query.statement_for_update(params).should eq %(UPDATE users SET "select" = $1 WHERE id = $2 LIMIT 1 RETURNING *)
-      query.args_for_update(params).should eq ["foobar", "1"]
+      query.statement_for_update(params).should eq %(UPDATE users SET "select" = $1 WHERE id = $2 LIMIT $3 RETURNING *)
+      query.args_for_update(params).should eq ["foobar", "1", "1"]
     end
   end
 
@@ -258,7 +258,7 @@ describe Avram::QueryBuilder do
       .join(Avram::Join::Inner.new(:users, :posts))
       .limit(1)
 
-    query.statement.should eq %(SELECT * FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" LIMIT 1)
+    query.statement.should eq %(SELECT * FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" LIMIT $1)
   end
 
   describe "#reverse_order" do
@@ -320,9 +320,9 @@ describe Avram::QueryBuilder do
         .limit(10)
         .offset(5)
 
-      cloned_query.statement.should eq %(SELECT "users"."name", "users"."age" FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" WHERE name = $1 AND age > $2 ORDER BY id ASC LIMIT 10 OFFSET 5)
+      cloned_query.statement.should eq %(SELECT "users"."name", "users"."age" FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" WHERE name = $1 AND age > $2 ORDER BY id ASC LIMIT $3 OFFSET $4)
 
-      old_query.statement.should eq %(SELECT "users"."name", "users"."age" FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" WHERE name = $1 ORDER BY id ASC LIMIT 1 OFFSET 2)
+      old_query.statement.should eq %(SELECT "users"."name", "users"."age" FROM users INNER JOIN posts ON "users"."id" = "posts"."user_id" WHERE name = $1 ORDER BY id ASC LIMIT $2 OFFSET $3)
     end
   end
 
@@ -362,8 +362,8 @@ describe Avram::QueryBuilder do
         .group_by(:age)
         .group_by(:average_score)
         .limit(10)
-      query.statement.should eq "SELECT * FROM users WHERE name = $1 GROUP BY age, average_score ORDER BY name DESC LIMIT 10"
-      query.args.should eq ["Paul"]
+      query.statement.should eq "SELECT * FROM users WHERE name = $1 GROUP BY age, average_score ORDER BY name DESC LIMIT $2"
+      query.args.should eq ["Paul", "10"]
     end
   end
 
