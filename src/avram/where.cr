@@ -422,7 +422,8 @@ module Avram::Where
   end
 
   class Raw < Condition
-    @clause : String
+    @statement : String
+    getter bound_values : Array(String | Array(String) | Array(Int32))
 
     def self.new(statement : String, *bind_vars)
       new(statement, args: bind_vars.to_a)
@@ -430,11 +431,23 @@ module Avram::Where
 
     def initialize(statement : String, *, args bind_vars : Array)
       ensure_enough_bind_variables_for!(statement, bind_vars)
-      @clause = build_clause(statement, bind_vars)
+      @statement = statement
+      @bound_values = Array(String | Array(String) | Array(Int32)).new(bind_vars.size)
+      bind_vars.each { |value| @bound_values << coerce_value(value) }
     end
 
+    # Each `?` is turned into a bound `$N` placeholder and its value flows into
+    # the query's args. Binding — rather than escaping the value into the SQL
+    # text — keeps the SQL string constant across distinct values, so the query
+    # reuses a single cached prepared statement instead of growing the
+    # per-connection statement cache. It also makes SQL injection structurally
+    # impossible: the value never becomes part of the statement.
     def prepare(placeholder_supplier : Proc(String)) : String
-      @clause
+      statement = @statement
+      bound_values.size.times do
+        statement = statement.sub('?', placeholder_supplier.call)
+      end
+      statement
     end
 
     private def ensure_enough_bind_variables_for!(statement, bind_vars)
@@ -444,27 +457,20 @@ module Avram::Where
       end
     end
 
-    private def build_clause(statement, bind_vars)
-      bind_vars.each do |arg|
-        encoded_arg = prepare_for_execution(arg)
-        statement = statement.sub('?', encoded_arg)
-      end
-      statement
-    end
-
-    private def prepare_for_execution(value)
-      if value.is_a?(Array)
-        "'#{PQ::Param.encode_array(value)}'"
-      else
-        escape_if_needed(value)
-      end
-    end
-
-    private def escape_if_needed(value)
-      if value.is_a?(String) || value.is_a?(Slice(UInt8))
-        PG::EscapeHelper.escape_literal(value)
-      else
+    # Match the `String | Array(String) | Array(Int32)` arg union the query
+    # builder already uses for bound values: arrays are passed through (encoded
+    # as a single array param), everything else is stringified and let Postgres
+    # infer the column type from context.
+    private def coerce_value(value) : String | Array(String) | Array(Int32)
+      case value
+      when Array(Int32), Array(String)
         value
+      when Array
+        value.map(&.to_s)
+      when String
+        value
+      else
+        value.to_s
       end
     end
   end

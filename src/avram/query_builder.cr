@@ -395,9 +395,17 @@ class Avram::QueryBuilder
   end
 
   private def prepared_statement_values : Array(String | Array(String) | Array(Int32))
-    wheres.compact_map do |sql_clause|
-      sql_clause.value if sql_clause.is_a?(Avram::Where::ValueHoldingSqlClause)
+    values = Array(String | Array(String) | Array(Int32)).new
+    wheres.each do |sql_clause|
+      case sql_clause
+      when Avram::Where::Raw
+        # Raw can carry several `?` -> several bound values.
+        values.concat(sql_clause.bound_values)
+      when Avram::Where::ValueHoldingSqlClause
+        values << sql_clause.value
+      end
     end
+    values
   end
 
   private def next_prepared_statement_placeholder : String

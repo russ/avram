@@ -436,9 +436,9 @@ describe Avram::Queryable do
       user = UserFactory.new.name("Mikias Abera").age(26).nickname("miki").create
       users = UserQuery.new.where("name = ? AND age = ?", "Mikias Abera", 26).where(:nickname, "miki")
 
-      users.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users WHERE name = 'Mikias Abera' AND age = 26 AND nickname = $1"
+      users.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users WHERE name = $1 AND age = $2 AND nickname = $3"
 
-      users.query.args.should eq ["miki"]
+      users.query.args.should eq ["Mikias Abera", "26", "miki"]
       users.results.should eq [user]
     end
 

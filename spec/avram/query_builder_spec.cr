@@ -96,46 +96,38 @@ describe Avram::QueryBuilder do
   end
 
   describe "accepts raw clauses" do
-    it "substituting binding parameters" do
+    it "binds each ? as a placeholder, with the values in args" do
       query = new_query
         .where(Avram::Where::Raw.new("name = ?", "Mikias"))
         .where(Avram::Where::Raw.new("age > ?", 26))
         .where(Avram::Where::Raw.new("age < ?", args: [30]))
         .limit(1)
-      query.statement.should eq "SELECT * FROM users WHERE name = 'Mikias' AND age > 26 AND age < 30 LIMIT $1"
-      query.args.should eq ["1"]
+      query.statement.should eq "SELECT * FROM users WHERE name = $1 AND age > $2 AND age < $3 LIMIT $4"
+      query.args.should eq ["Mikias", "26", "30", "1"]
     end
 
-    it "escaping elements to prevent sql injections" do
-      expected = <<-SQL
-      SELECT * FROM users WHERE name = 'aloha'';--'
-      SQL
+    it "binds values so they cannot inject sql" do
       query = new_query.where(Avram::Where::Raw.new("name = ?", "aloha';--"))
-      query.statement.should eq expected
+      query.statement.should eq "SELECT * FROM users WHERE name = $1"
+      query.args.should eq ["aloha';--"]
     end
 
-    it "correctly managing input arrays" do
-      expected = <<-SQL
-      SELECT * FROM users WHERE tags && '{"ruby","crystal"}'
-      SQL
+    it "binds an array value as a single parameter" do
       query = new_query.where(Avram::Where::Raw.new("tags && ?", ["ruby", "crystal"]))
-      query.statement.should eq expected
+      query.statement.should eq "SELECT * FROM users WHERE tags && $1"
+      query.args.should eq [["ruby", "crystal"]]
     end
 
-    it "preventing sql injections with arrays (1)" do
-      expected = <<-SQL
-      SELECT * FROM users WHERE tags && '{"ruby","crystal';--"}'
-      SQL
+    it "binds array elements verbatim, so they cannot inject sql" do
       query = new_query.where(Avram::Where::Raw.new("tags && ?", ["ruby", "crystal';--"]))
-      query.statement.should eq expected
+      query.statement.should eq "SELECT * FROM users WHERE tags && $1"
+      query.args.should eq [["ruby", "crystal';--"]]
     end
 
-    it "preventing sql injections with arrays (2)" do
-      expected = <<-SQL
-      SELECT * FROM users WHERE tags && '{"ruby","crystal\\"}';--"}'
-      SQL
+    it "binds array elements containing quotes and escapes verbatim" do
       query = new_query.where(Avram::Where::Raw.new("tags && ?", ["ruby", "crystal\"}';--"]))
-      query.statement.should eq expected
+      query.statement.should eq "SELECT * FROM users WHERE tags && $1"
+      query.args.should eq [["ruby", "crystal\"}';--"]]
     end
   end
 
