@@ -112,14 +112,9 @@ module Avram::PrimaryKeyMethods
   end
 
   def delete
-    self.class.write_database.exec "DELETE FROM #{@@table_name} WHERE #{primary_key_name} = #{escape_primary_key(id)}"
-  end
-
-  private def escape_primary_key(id : Int64 | Int32 | Int16)
-    id
-  end
-
-  private def escape_primary_key(id : UUID | String)
-    PG::EscapeHelper.escape_literal(id.to_s)
+    # Bind the id rather than interpolating it: with UUID/String primary keys an
+    # inlined id makes every `DELETE` a distinct SQL string, which leaks the
+    # per-connection prepared-statement cache one entry per deleted record.
+    self.class.write_database.exec "DELETE FROM #{@@table_name} WHERE #{primary_key_name} = $1", id
   end
 end

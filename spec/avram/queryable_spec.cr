@@ -207,7 +207,7 @@ describe Avram::Queryable do
 
       user.should_not be_nil
       user.as(User).name.should eq "First"
-      user_query.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."id" ASC LIMIT 1)
+      user_query.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."id" ASC LIMIT $1)
     end
 
     it "returns nil if no record found" do
@@ -285,7 +285,7 @@ describe Avram::Queryable do
       user_query = Avram::Events::QueryEvent.logged_events.last.query
 
       user.should_not be_nil
-      user_query.should eq "SELECT #{User::COLUMN_SQL} FROM users ORDER BY RANDOM () LIMIT 1"
+      user_query.should eq "SELECT #{User::COLUMN_SQL} FROM users ORDER BY RANDOM () LIMIT $1"
     end
   end
 
@@ -299,7 +299,7 @@ describe Avram::Queryable do
 
       user.should_not be_nil
       user.as(User).name.should eq "Last"
-      user_query.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."id" DESC LIMIT 1)
+      user_query.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."id" DESC LIMIT $1)
     end
 
     it "returns nil if last record is not found" do
@@ -436,9 +436,9 @@ describe Avram::Queryable do
       user = UserFactory.new.name("Mikias Abera").age(26).nickname("miki").create
       users = UserQuery.new.where("name = ? AND age = ?", "Mikias Abera", 26).where(:nickname, "miki")
 
-      users.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users WHERE name = 'Mikias Abera' AND age = 26 AND nickname = $1"
+      users.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users WHERE name = $1 AND age = $2 AND nickname = $3"
 
-      users.query.args.should eq ["miki"]
+      users.query.args.should eq ["Mikias Abera", "26", "miki"]
       users.results.should eq [user]
     end
 
@@ -503,7 +503,7 @@ describe Avram::Queryable do
       new_query = orig_query.where(&.nickname("BusyCat")).limit(3)
 
       orig_query.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users"
-      new_query.query.statement.should eq %(SELECT #{User::COLUMN_SQL} FROM users WHERE ( "users"."nickname" = $1 ) LIMIT 3)
+      new_query.query.statement.should eq %(SELECT #{User::COLUMN_SQL} FROM users WHERE ( "users"."nickname" = $1 ) LIMIT $2)
     end
 
     it "doesn't add parenthesis when query to wrap is provided" do
@@ -525,7 +525,7 @@ describe Avram::Queryable do
     it "adds a limit clause" do
       queryable = UserQuery.new.limit(2)
 
-      queryable.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users LIMIT 2"
+      queryable.query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users LIMIT $1"
     end
 
     it "works while chaining" do
@@ -533,7 +533,7 @@ describe Avram::Queryable do
       UserFactory.create
       users = UserQuery.new.name.desc_order.limit(1)
 
-      users.query.statement.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."name" DESC LIMIT 1)
+      users.query.statement.should eq %(SELECT #{User::COLUMN_SQL} FROM users ORDER BY "users"."name" DESC LIMIT $1)
 
       users.results.size.should eq(1)
     end
@@ -552,7 +552,7 @@ describe Avram::Queryable do
     it "adds an offset clause" do
       query = UserQuery.new.offset(2).query
 
-      query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users OFFSET 2"
+      query.statement.should eq "SELECT #{User::COLUMN_SQL} FROM users OFFSET $1"
     end
 
     it "doesn't mutate the query" do

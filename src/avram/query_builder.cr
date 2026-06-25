@@ -88,7 +88,7 @@ class Avram::QueryBuilder
   end
 
   def args_for_update(params)
-    param_values(params) + prepared_statement_values
+    param_values(params) + prepared_statement_values + limit_offset_values
   end
 
   private def param_values(params)
@@ -117,7 +117,18 @@ class Avram::QueryBuilder
   end
 
   def args : Array(String | Array(String) | Array(Int32))
-    prepared_statement_values
+    prepared_statement_values + limit_offset_values
+  end
+
+  # LIMIT/OFFSET are bound as params (see `limit_sql`/`offset_sql`) so that
+  # paginating a query reuses ONE cached prepared statement instead of minting a
+  # fresh one per distinct offset. Order matches the placeholder order in
+  # `sql_condition_clauses`: limit before offset, after the wheres.
+  private def limit_offset_values : Array(String)
+    values = [] of String
+    values << @limit.to_s if @limit
+    values << @offset.to_s if @offset
+    values
   end
 
   private def sql_condition_clauses
@@ -310,13 +321,13 @@ class Avram::QueryBuilder
 
   private def limit_sql : String?
     if @limit
-      "LIMIT #{@limit}"
+      "LIMIT #{next_prepared_statement_placeholder}"
     end
   end
 
   private def offset_sql : String?
     if @offset
-      "OFFSET #{@offset}"
+      "OFFSET #{next_prepared_statement_placeholder}"
     end
   end
 
@@ -384,9 +395,17 @@ class Avram::QueryBuilder
   end
 
   private def prepared_statement_values : Array(String | Array(String) | Array(Int32))
-    wheres.compact_map do |sql_clause|
-      sql_clause.value if sql_clause.is_a?(Avram::Where::ValueHoldingSqlClause)
+    values = Array(String | Array(String) | Array(Int32)).new
+    wheres.each do |sql_clause|
+      case sql_clause
+      when Avram::Where::Raw
+        # Raw can carry several `?` -> several bound values.
+        values.concat(sql_clause.bound_values)
+      when Avram::Where::ValueHoldingSqlClause
+        values << sql_clause.value
+      end
     end
+    values
   end
 
   private def next_prepared_statement_placeholder : String
