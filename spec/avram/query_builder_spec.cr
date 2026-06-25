@@ -129,6 +129,12 @@ describe Avram::QueryBuilder do
       query.statement.should eq "SELECT * FROM users WHERE tags && $1"
       query.args.should eq [["ruby", "crystal\"}';--"]]
     end
+
+    it "binds a Bytes value as the postgres bytea hex format" do
+      query = new_query.where(Avram::Where::Raw.new("data = ?", Bytes[0x68, 0x69]))
+      query.statement.should eq "SELECT * FROM users WHERE data = $1"
+      query.args.should eq ["\\x6869"]
+    end
   end
 
   it "can be ordered" do

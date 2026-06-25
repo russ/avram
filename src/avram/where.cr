@@ -451,9 +451,9 @@ module Avram::Where
     end
 
     private def ensure_enough_bind_variables_for!(statement, bind_vars)
-      bindings = statement.chars.select!(&.== '?')
-      if bindings.size != bind_vars.size
-        raise "wrong number of bind variables (#{bind_vars.size} for #{bindings.size}) in #{statement}"
+      bindings = statement.count('?')
+      if bindings != bind_vars.size
+        raise "wrong number of bind variables (#{bind_vars.size} for #{bindings}) in #{statement}"
       end
     end
 
@@ -469,6 +469,10 @@ module Avram::Where
         value.map(&.to_s)
       when String
         value
+      when Slice(UInt8)
+        # Encode bytea as the `\xHEX` text format Postgres accepts, matching the
+        # existing Bytes adapter so the bound param round-trips correctly.
+        Slice.adapter.to_db(value)
       else
         value.to_s
       end
